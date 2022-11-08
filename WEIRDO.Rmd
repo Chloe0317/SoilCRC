@@ -1,0 +1,136 @@
+this script is to recode the parameters in Brown et al. (2018) for WEIRDO to enable the automatic fitting of xf and cf
+
+```{r setup, include=FALSE}
+rm(list = ls())
+################
+# define functions used 
+######################
+
+calc_HC <- function(cf, xf, rr, np){
+  #function to calculate hydraulic conductivity from cf xf
+  
+  # create a dataframe 
+  df <- cbind.data.frame(rep(cf, length(rr)),rr,rep(xf, length(rr)), np)
+  volumetricFlow <- apply(df, 1, function(x){
+    aa <-as.numeric(x)
+    # vp <- cf* r^xf * np
+    y <- aa[1]*(aa[2]^aa[3])*aa[4]
+    y
+  })
+  poreCapillarity <- volumetricFlow/1e6*3600
+  kthetas <- cumsum(rev(poreCapillarity))
+  out <- data.frame('meanPoreRadius' = rr, 
+                    'No_of_Pores' = np,
+                    'PoreCapillarity' = poreCapillarity,
+                    'HydraulicConductivity' = rev(kthetas))
+  return(out)
+}
+
+optimCFXF <- function(cfxf, rr, np, ksat){
+  # function to be optimised to obtain best xf and cf values
+  cf <- cfxf[1]
+  xf <- cfxf[2]
+  # create a dataframe 
+  df <- cbind.data.frame(rep(cf, length(rr)),rr,rep(xf, length(rr)), np)
+  volumetricFlow <- apply(df, 1, function(x){
+    aa <-as.numeric(x)
+    # vp <- cf* r^xf * np
+    y <- aa[1]*(aa[2]^aa[3])*aa[4]
+    y
+  })
+  poreCapillarity <- volumetricFlow/1e6*3600
+  kcalc_sat <- sum(poreCapillarity)
+  out <- abs(ksat-kcalc_sat)
+  return(out)
+}
+
+############################
+# 1. model structure
+# Pore characteristics, each profile layer contains 11 pore cohorts where similar sized pores are grouped together, with indices 0-9
+# Dw is set when model processes
+# model requires water contents at saturation, air-entry water potential head, drained upper limit, lower limit, and air dry
+# theta at matric potential 0, variable (between -10 ~ -1000), -1000, -150000, -6.0E7 mm
+
+# there are 10 pore cohorts per layer
+# diameters of the boundaries for the 10 pore cohorts
+poreBoundaries <- poreDiameterUpper <- c(3000, 1194, 475, 189, 75, 30, 8.6, 2.47, 0.707, 0.202, 0.0005)
+poreDiameterLower <- c(poreDiameterUpper[2:11], 0)
+
+
+# matric potential corresponding to SAT, DUL, LL, oven dry (mm)
+# if no hbub data, assume it from the high sand soil in Brown 2018
+# thetaS saturation was assumed the same as hbub
+
+mPotential <- -c(1,10, 1000, 150000, 6.09E7)
+
+```
+
+```{r input, include=FALSE}
+###general set up ------------
+# get the soil attributes 
+# (This is based on SoilSet 4592 for KParamFit (https://github.com/HamishBrownPFR/WEIRDO/blob/master/KParamFit.ipynb), no data for theta at AirDry, using 0.001 to ensure positive waterRetentionCurve)
+#'SAT','wchBub','DUL', 'LL15',  'AirDry'
+thetas <- c(0.45, 0.45, 0.38, 0.20, 0.001)
+
+#setting psibub here
+psibub <- -100
+
+
+```
+
+Fit a 5-point Hermite spline to derive the water retention curve for the soil profile, and use an optimisation routine to calculate these two empirical parameters based on the hydraulic conductivity at saturation, and the number of pores in each pore cohort
+
+```{r opt, include=FALSE}
+mPotential[2] <- psibub
+
+# get water potential at pore boundaries
+psiBoundary <- -30000/poreBoundaries
+
+# get the mean pore radii of pore cohort
+rr <- (poreDiameterUpper+poreDiameterLower)/4
+
+####################
+# fit hermite splines to soil-water characteristic and the conductivity curve
+######################
+# fit the 5-point hermite spline 
+waterRetentionC <- splinefun(x = mPotential, y = thetas, method = 'monoH.FC')
+
+# get thetas at pore boundaries using the fitted spline
+thetas.upperBound <- waterRetentionC(psiBoundary)
+thetas.lowerBound <- c(thetas.upperBound[2:11],0)
+# get the water volume in each pore cohort
+waterVolumePore <- thetas.upperBound-thetas.lowerBound
+
+# calculate number of pores in each pore cohort
+numbersPore <- waterVolumePore/((pi * rr^2)/10^12)
+
+# The hydraulic-flow model (Aryal et al. 1999 implemented in Brown et al. 2018)
+# to derive Cf and Xf
+
+cfxf <- optim(c(5e-12, 3.5), optimCFXF, rr = rr, np = numbersPore, ksat = 0.2359)
+while (cfxf$value != 0){
+  cfxf <- optim(cfxf$par, optimCFXF, rr = rr, np = numbersPore, ksat = 0.2359)
+}
+cfxf <- cfxf$par
+
+cfxf
+```
+
+Cf = `r cfxf[1]` Xf = `r cfxf[2]`
+
+```{r spline, echo=FALSE}
+# plot the spline to inspect
+plot(log10(-mPotential), thetas, xlab = 'log10(-Suction)', 
+     ylab = expression(theta*("mm"^3/'mm'^3)))
+curve(waterRetentionC(-10^x, deriv = 0), add = T)
+```
+
+```{r k, echo=FALSE}
+
+# plot hydraulic conductivity
+df.hc <- calc_HC(cfxf[1], cfxf[2], rr, numbersPore)
+plot(log10(-psiBoundary), df.hc$HydraulicConductivity, xlab = 'log10(-Suction)', 
+     ylab = 'Hydraulic conductivity (mm/h)')
+lines(log10(-psiBoundary), df.hc$HydraulicConductivity)
+
+```
