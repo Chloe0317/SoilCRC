@@ -1,6 +1,6 @@
 this script is to recode the parameters in Brown et al. (2018) for WEIRDO to enable the automatic fitting of xf and cf
 
-```{r setup, include=FALSE}
+```{r setup, include=TRUE}
 rm(list = ls())
 ################
 # define functions used 
@@ -65,7 +65,7 @@ mPotential <- -c(1,10, 1000, 150000, 6.09E7)
 
 ```
 
-```{r input, include=FALSE}
+```{r input, include=TRUE}
 ###general set up ------------
 # get the soil attributes 
 # (This is based on SoilSet 4592 for KParamFit (https://github.com/HamishBrownPFR/WEIRDO/blob/master/KParamFit.ipynb), no data for theta at AirDry, using 0.001 to ensure positive waterRetentionCurve)
@@ -80,7 +80,7 @@ psibub <- -100
 
 Fit a 5-point Hermite spline to derive the water retention curve for the soil profile, and use an optimisation routine to calculate these two empirical parameters based on the hydraulic conductivity at saturation, and the number of pores in each pore cohort
 
-```{r opt, include=FALSE}
+```{r opt, include=TRUE}
 mPotential[2] <- psibub
 
 # get water potential at pore boundaries
@@ -118,14 +118,14 @@ cfxf
 
 Cf = `r cfxf[1]` Xf = `r cfxf[2]`
 
-```{r spline, echo=FALSE}
+```{r spline, echo=TRUE}
 # plot the spline to inspect
 plot(log10(-mPotential), thetas, xlab = 'log10(-Suction)', 
      ylab = expression(theta*("mm"^3/'mm'^3)))
 curve(waterRetentionC(-10^x, deriv = 0), add = T)
 ```
 
-```{r k, echo=FALSE}
+```{r k, echo=TRUE}
 
 # plot hydraulic conductivity
 df.hc <- calc_HC(cfxf[1], cfxf[2], rr, numbersPore)
